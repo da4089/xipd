@@ -53,9 +53,11 @@
 #include <elvin/errors/unix.h>
 #include <elvin/utils.h>
 
+#include "getopt.h"
+
 
 /*#define ACTIVE_DELAY  (300)*/
-#define ACTIVE_DELAY  (2)
+#define ACTIVE_DELAY  (30)
 
 
 static elvin_error_t error;

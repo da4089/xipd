@@ -81,7 +81,11 @@ am__include = @am__include@
 am__quote = @am__quote@
 install_sh = @install_sh@
 sbin_PROGRAMS = xipd
-xipd_SOURCES = dpms.c proc.c xipd.c 
+
+@HAVE_GETOPT_LONG_TRUE@GETOPT_C = 
+@HAVE_GETOPT_LONG_FALSE@GETOPT_C = getopt.c getopt1.c
+
+xipd_SOURCES = $(GETOPT_C) dpms.c proc.c xipd.c 
 man_MANS = xipd.8
 EXTRA_DIST = $(man_MANS)
 subdir = .
@@ -92,7 +96,11 @@ CONFIG_CLEAN_FILES =
 sbin_PROGRAMS = xipd$(EXEEXT)
 PROGRAMS = $(sbin_PROGRAMS)
 
-am_xipd_OBJECTS = dpms.$(OBJEXT) proc.$(OBJEXT) xipd.$(OBJEXT)
+@HAVE_GETOPT_LONG_TRUE@am__objects_1 =
+@HAVE_GETOPT_LONG_FALSE@am__objects_1 = getopt.$(OBJEXT) \
+@HAVE_GETOPT_LONG_FALSE@	getopt1.$(OBJEXT)
+am_xipd_OBJECTS = $(am__objects_1) dpms.$(OBJEXT) proc.$(OBJEXT) \
+	xipd.$(OBJEXT)
 xipd_OBJECTS = $(am_xipd_OBJECTS)
 xipd_LDADD = $(LDADD)
 xipd_DEPENDENCIES =
@@ -105,7 +113,8 @@ LDFLAGS = @LDFLAGS@
 LIBS = @LIBS@
 depcomp = $(SHELL) $(top_srcdir)/depcomp
 am__depfiles_maybe = depfiles
-@AMDEP_TRUE@DEP_FILES = ./$(DEPDIR)/dpms.Po ./$(DEPDIR)/proc.Po \
+@AMDEP_TRUE@DEP_FILES = ./$(DEPDIR)/dpms.Po ./$(DEPDIR)/getopt.Po \
+@AMDEP_TRUE@	./$(DEPDIR)/getopt1.Po ./$(DEPDIR)/proc.Po \
 @AMDEP_TRUE@	./$(DEPDIR)/xipd.Po
 COMPILE = $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) \
 	$(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS)
@@ -193,6 +202,8 @@ distclean-compile:
 	-rm -f *.tab.c
 
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/dpms.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/getopt.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/getopt1.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/proc.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/xipd.Po@am__quote@
 

@@ -1,2 +1,12 @@
 *~
 .nfs*
+xipd
+.deps 
+stamp-h1
+config.h
+config.h.in
+Makefile
+config.log
+config.status
+configure
+

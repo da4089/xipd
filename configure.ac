@@ -135,6 +135,10 @@ AC_CHECK_FUNCS(\
     inet_ntop \
 )
 
+AC_CHECK_FUNC(getopt_long,[have_getopt_long=yes],[have_getopt_long=no])
+AM_CONDITIONAL(HAVE_GETOPT_LONG, test "x$have_getopt_long" = xyes)
+
+
 #  basename
 
 AC_CHECK_LIB(c, basename, [AC_DEFINE(HAVE_BASENAME)], [
