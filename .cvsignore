@@ -3,7 +3,7 @@
 xipd
 .deps 
 stamp-h1
-stamp-h1.in
+stamp-h.in
 config.h
 config.h.in
 Makefile

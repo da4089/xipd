@@ -204,7 +204,7 @@ int send_initial_presence_info(state_t s)
         ! elvin_notification_add_string(nfn, "Client-Id", s->client_id, s->error) ||
         ! elvin_notification_add_string(nfn, "User", s->user, s->error) ||
         ! elvin_notification_add_string(nfn, "Groups", s->app_data.groups, s->error) ||
-        ! elvin_notification_add_string(nfn, "Status", STATUS_ONLINE, s->error) ||
+        ! elvin_notification_add_string(nfn, "Status", STATUS_DOUBTFUL, s->error) ||
         ! elvin_notification_add_string(nfn, "Status-Text", text, s->error) ||
         ! elvin_notification_add_int32 (nfn, "Status-Duration", 0, s->error)) {
         elvin_error_fprintf(stderr, s->error);
@@ -334,9 +334,6 @@ int send_event(state_t s, int now_active)
         exit(1);
     }
 
-    /* Reset last update time */
-    s->last_change = time(NULL);
-
     return 1;
 }
 
@@ -353,6 +350,7 @@ int check_activity(state_t state)
             if (! state->is_active) {
                 printf("went active\n");
                 state->is_active = 1;
+                state->last_change = time(NULL);
                 send_event(state, 1);
             }
 
@@ -360,6 +358,7 @@ int check_activity(state_t state)
             if (state->is_active) {
                 printf("went passive\n");
                 state->is_active = 0;
+                state->last_change = time(NULL);
                 send_event(state, 0);
             }
         }
@@ -380,6 +379,7 @@ int check_activity(state_t state)
             if (state->is_active) {
                 printf("went passive ...\n");
                 state->is_active = 0;
+                state->last_change = time(NULL);
                 send_event(state, 0);
             }
 
@@ -388,6 +388,7 @@ int check_activity(state_t state)
             if (! state->is_active) {
                 printf("went active ...\n");
                 state->is_active = 1;
+                state->last_change = time(NULL);
                 send_event(state, 1);
             }
         }
