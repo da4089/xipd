@@ -54,7 +54,7 @@ AC_CHECK_LIB(Xt, XtVaAppInitialize,
 # Library support for X11 DPMS Extension
 
 have_dpms=no
-AC_CHECK_HEADER(X11/extensions/dpms.h, [have_dpms=yes])
+AC_CHECK_HEADER(X11/extensions/dpms.h, [have_dpms=yes], [true], [#include <X11/Xlib.h>])
 
 # if that succeeded, then check for the DPMS code in the libraries
 if test "$have_dpms" = yes; then
@@ -127,6 +127,7 @@ AC_CHECK_HEADERS(\
     libgen.h \
     netdb.h \
     netinet/in.h \
+    signal.h \
     stdlib.h \
     stdio.h \
     string.h \

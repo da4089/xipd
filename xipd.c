@@ -41,6 +41,11 @@
 # include <arpa/inet.h>
 #endif
 
+#if defined(HAVE_SIGNAL_H)
+# include <signal.h>
+#endif
+
+
 #include <X11/Xlib.h>
 #include <X11/Xresource.h>
 #include <X11/Intrinsic.h>
@@ -130,6 +135,8 @@ static XrmOptionDescRec opt_table[] =
     {"--domain",     "*domain",     XrmoptionSepArg, (XPointer)NULL},
     {"-location",    "*location",   XrmoptionSepArg, (XPointer)NULL},
     {"--location",   "*location",   XrmoptionSepArg, (XPointer)NULL},
+    {"-groups",      "*groups",     XrmoptionSepArg, (XPointer)NULL},
+    {"--groups",     "*groups",     XrmoptionSepArg, (XPointer)NULL},
     {"-standalone",  "*standalone", XrmoptionNoArg,  "True"},
     {"--standalone", "*standalone", XrmoptionNoArg,  "True"},
     {"-help",        "*help",       XrmoptionNoArg,  "True"},
@@ -152,6 +159,11 @@ static XtResource resources[] =
     {"help", "Help", XtRBool, sizeof(XtRBool), XtOffsetOf(struct app_data, help), XtRBool, "False"},
     {"version", "Version", XtRBool, sizeof(XtRBool), XtOffsetOf(struct app_data, version), XtRBool, "False"},
 };
+
+
+/* Signal handler identifier */
+static XtSignalId sigint_id;
+
 
 
 /* Prints out the usage message */
@@ -411,6 +423,34 @@ void disconnect_cb(elvin_handle_t handle, int result, void *rock, elvin_error_t 
 }
 
 
+/* Handle Unix signal */
+void sigint(int signo)
+{
+    XtNoticeSignal(sigint_id);
+}
+
+
+/* Handle SIGINT signal callback from Xt */
+void sigint_cb(XtPointer rock, XtSignalId *id)
+{
+    state_t s = (state_t)rock;
+
+    /* Send final notification */
+    if (s->app_data.standalone) {
+        send_final_presence_info(s);
+    }
+
+    /* Disconnect and clean up */
+    if (! elvin_xt_disconnect(s->handle, disconnect_cb, rock, s->error) ) {
+        elvin_error_fprintf(stderr, s->error);
+        exit(1);
+    }
+
+    return;
+}
+
+
+
 void timer_cb(XtPointer rock, XtIntervalId *id)
 {
     state_t state = (state_t)rock;
@@ -431,6 +471,10 @@ void connect_cb(elvin_handle_t handle, int result, void *rock, elvin_error_t err
 {
     state_t state = (state_t)rock;
 
+    /* Set SIGINT handler */
+    sigint_id = XtAppAddSignal(state->app_context, sigint_cb, (XtPointer)rock);
+    signal(SIGINT, sigint);
+
     /* Send initial notification */
     if (state->app_data.standalone) {
         send_initial_presence_info(state);
@@ -441,15 +485,6 @@ void connect_cb(elvin_handle_t handle, int result, void *rock, elvin_error_t err
                                    ACTIVE_DELAY * 1000, 
                                    timer_cb, 
                                    (XtPointer)state);
-
-#if 0
-    /* Disconnect and clean up */
-    if (! elvin_xt_disconnect(handle, disconnect_cb, rock, error) ) {
-        elvin_error_fprintf(stderr, error);
-        exit(1);
-    }
-#endif
-
     return;
 }
 
@@ -467,7 +502,7 @@ int main(int argc, char *argv[])
     state.toplevel = XtVaAppInitialize(&state.app_context,
                                        APP_CLASS,
                                        opt_table,
-                                       16,
+                                       XtNumber(opt_table),
                                        &xargc,
                                        argv,
                                        NULL,
