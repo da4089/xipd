@@ -63,75 +63,47 @@ fi
 
 # Library support for X11
 
+AC_PATH_X
 AC_PATH_XTRA
 
-echo $X_CFLAGS
-echo $X_LIBS
-echo $X_PRE_LIBS
-echo $X_EXTRA_LIBS
-echo $LIBS
-echo $CPPFLAGS
+if test "x$no_x" != xyes; then
 
-CPPFLAGS="$CPPFLAGS $X_CFLAGS"
-LDFLAGS="$LDFLAGS $X_LIBS"
-LIBS="$X_PRE_LIBS $X_LIBS $X_EXTRA_LIBS $LIBS"
-
-
-# Look for the library and include files
-AC_CHECK_LIB(Xt, XtVaAppInitialize,
-    [AC_CHECK_HEADER(X11/Intrinsic.h, failed=no, failed=headers)],
-    failed=libraries)
-
-# Any luck?
-if test "x$failed" != xno ; then
-    AC_MSG_ERROR([unable to locate the Xt $failed])
-    exit 1
-fi
-
-
-# Library support for X11 DPMS Extension
-
-have_dpms=no
-
-# first check for dpms.h
-AC_CHECK_HEADER(X11/extensions/dpms.h, [have_dpms=yes])
-
-# if that succeeded, then check for the DPMS code in the libraries
-if test "$have_dpms" = yes; then
-
-    # first look in -lXext (this is where it is with XFree86 4.0)
+    # Library support for X11 DPMS Extension
+    
     have_dpms=no
-    AC_CHECK_LIB(Xext, DPMSInfo, [have_dpms=yes], [true], -lXext -lX11)
-
-    # if that failed, look in -lXdpms (this is where it was in XFree86 3.x)
-    if test "$have_dpms" = no; then
-        AC_CHECK_LIB(Xdpms, DPMSInfo,
-                     [have_dpms=yes; XDPMS_LIBS="-lXdpms"], [true],
-                     -lXext -lX11)
+    AC_CHECK_HEADER(X11/extensions/dpms.h, [have_dpms=yes])
+    
+    # if that succeeded, then check for the DPMS code in the libraries
+    if test "$have_dpms" = yes; then
+    
+        xlibs="$X_LIBS $X_PRE_LIBS -lX11 $X_EXTRA_LIBS $LIBS"
+    
+        # first look in -lXext (this is where it is with XFree86 4.0)
+        have_dpms=no
+        AC_CHECK_LIB(Xext, DPMSInfo, 
+                     [have_dpms=yes 
+                      xlibs="$X_LIBS $X_PRE_LIBS -lXext -lX11 $X_EXTRA_LIBS $LIBS"],
+                     [true], 
+                     [$xlibs])
+    
+        # if that failed, look in -lXdpms (this is where it was in XFree86 3.x)
+        if test "$have_dpms" = no; then
+            AC_CHECK_LIB(Xdpms, DPMSInfo,
+                         [have_dpms=yes
+                          xlibs="$X_LIBS $X_PRE_LIBS -lXdpms -lXext -lX11 $X_EXTRA_LIBS $LIBS"],
+                         [true],
+                         [$xlibs])
+        fi
+    fi
+    
+    # if that succeeded, then we've really got it.
+    if test "$have_dpms" = yes; then
+        AC_DEFINE(HAVE_DPMS_EXTENSION,1,[Define if X libraries have DPMS extension support])
+	LIBS="$xlibs"
+	CFLAGS="$CFLAGS $X_CFLAGS"
     fi
 fi
 
-# if that succeeded, then we've really got it.
-if test "$have_dpms" = yes; then
-    AC_DEFINE(HAVE_DPMS_EXTENSION,1,[Define if X libraries have DPMS extension support])
-fi
-
-
-# Library support for MIT Screen Saver Extension
-
-have_mit=no
-AC_CHECK_HEADER(X11/extensions/scrnsaver.h, [have_mit=yes])
-if test x"$have_mit" = xyes; then
-    AC_SEARCH_LIBS(XScreenSaverRegister, 
-                   [Xext XExExt Xss], 
-                   [true], 
-                   [have_mit=no], 
-                   [-lX11 -lXext -lm])
-
-    if test "$have_mit" = yes; then
-        AC_DEFINE(HAVE_MIT_SAVER_EXTENSION,1,[Define for support for MIT-Screen-Saver])
-    fi
-fi
 
 ########################################################################
 

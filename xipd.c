@@ -44,6 +44,8 @@
 # include <arpa/inet.h>
 #endif
 
+#include <X11/Xlib.h>
+
 #include <elvin/elvin.h>
 #include <elvin/memory.h>
 #include <elvin/sync_api.h>
@@ -52,8 +54,8 @@
 #include <elvin/utils.h>
 
 
-#define PROC_BUFFER   (1024)
-#define ACTIVE_DELAY  (300)
+/*#define ACTIVE_DELAY  (300)*/
+#define ACTIVE_DELAY  (2)
 
 
 static elvin_error_t error;
@@ -72,7 +74,7 @@ static struct option long_options[] =
     { "location", required_argument, NULL, 'l' },
     { "groups", required_argument, NULL, 'g' },
     { "standalone", no_argument, NULL, 's' },
-    { "debug", no_argument, NULL, 'd' },
+    { "display", required_argument, NULL, 'd' },
     { "version", no_argument, NULL, 'v' },
     { "help", no_argument, NULL, 'h' },
     { NULL, no_argument, NULL, '\0' }
@@ -90,57 +92,10 @@ static void usage(int argc, char *argv[])
     fprintf(stderr, "  -D domain,    --domain=domain\n");
     fprintf(stderr, "  -l location,  --location=location\n");
     fprintf(stderr, "  -g groups,    --groups=group[,group...]\n");
+    fprintf(stderr, "  -d display,   --display=host:0\n");
     fprintf(stderr, "  -s,           --standalone\n");
-    fprintf(stderr, "  -d,           --debug\n");
     fprintf(stderr, "  -v,           --version\n");
     fprintf(stderr, "  -h,           --help\n");
-}
-
-
-/* Read Linux' /proc/interrupts and extract keyboard/mouse counts */
-int read_proc(long *keyboard, long *mouse)
-{
-    FILE *interrupts;
-    char *s;
-    int intr = 0;
-    long count = 0;
-    char *dev;
-
-    if (! (interrupts = fopen("/proc/interrupts", "r"))) {
-        return 0;
-    }
-
-    if (! (s = (char *)malloc(PROC_BUFFER))) {
-        return 0;
-    }
-
-    if (! (dev = (char *)malloc(PROC_BUFFER))) {
-        return 0;
-    }
-
-    do {
-        if (! fgets(s, PROC_BUFFER, interrupts)) {
-            break;
-        }
-
-        if (sscanf(s, " %d : %ld XT-PIC %s ", &intr, &count, dev)) {
-            /*printf("intr %d\tcount %ld\tdev %s\n", intr, count, dev);*/
-
-            if (strcmp("keyboard", dev) == 0) {
-                *keyboard = count;
-            }
-
-            if (strcmp("PS/2", dev) == 0) {
-                *mouse = count;
-            }
-        }
-    } while (s);
-
-    free(s);
-    free(dev);
-    fclose(interrupts);
-
-    return 1;
 }
 
 
@@ -186,16 +141,17 @@ int send_event(int now_active)
 
 int main(int argc, char *argv[])
 {
+    char *display_name = NULL;
+    Display *display;
     int	getopt_error = 0;
     char c;
-    char host[64], addr[64], varbinds[8192];
+    char host[64], addr[64];
     char *space, *cr;
     struct hostent *this_host;
-
     int is_active = 1;
+    int have_x, have_dpms, have_proc;
 
-
-    /* Initialise our error handle */
+    /* Initialise our Elvin error and handle */
 #if ! defined(ELVIN_VERSION_AT_LEAST)
     if (! (error = elvin_sync_init_default())) {
         fprintf(stderr, "Failed to initialise Elvin library\n");
@@ -217,7 +173,7 @@ int main(int argc, char *argv[])
         elvin_error_fprintf(stderr, error);
         exit(1);
     }
-    
+
     /* Process the arguments */
     optarg = NULL;
     while (!getopt_error && (-1 != (c = getopt_long(argc, 
@@ -226,6 +182,10 @@ int main(int argc, char *argv[])
                                                     long_options,
                                                     NULL)))) {
         switch(c) {
+
+        case 'd':
+            display_name = optarg;
+            break;
 
         case 'e':
             if (! elvin_handle_append_url(handle, optarg, error)) {
@@ -307,11 +267,56 @@ int main(int argc, char *argv[])
     }
 
 
+    /* Decide whether we have a useful X display available */
+    have_x = 0;
+
+    if (! display_name) {
+        display_name = getenv("DISPLAY");
+    }
+
+    if (display_name) {
+        display = XOpenDisplay(display_name);
+        have_x = 1; /* FIXME: error handler? */
+    }
+
+    /* Check whether X display supports DPMS */
+    have_dpms = 0;
+    if (have_x) {
+        have_dpms = xipd_have_dpms(display);
+    }
+
+
+
     /* */
-    if (0) {
+    if (have_dpms) {
 
+        printf("have dpms!\n");
 
-    } else {
+        while (1) {
+            int on;
+            
+            xipd_read_dpms(display, &on);
+
+            if (on) {
+                if (! is_active) {
+                    printf("went active\n");
+                    is_active = 1;
+                    send_event(1);
+                }
+
+            } else {
+                if (is_active) {
+                    printf("went passive\n");
+                    is_active = 0;
+                    send_event(0);
+                }
+            }
+
+            printf("sleep\n");
+            sleep (ACTIVE_DELAY);
+        }
+
+    } else if (have_proc) {
 
         long keyboard, last_keyboard = 0;
         long mouse, last_mouse = 0;
@@ -320,7 +325,7 @@ int main(int argc, char *argv[])
         while (1) {
 
             /* Get interrupt counts */
-            if (! (read_proc(&keyboard, &mouse))) {
+            if (! (xipd_read_proc(&keyboard, &mouse))) {
                 fprintf(stderr, "error reading /proc/interrupts !?\n");
                 exit(1);
             }

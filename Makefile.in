@@ -81,7 +81,7 @@ am__include = @am__include@
 am__quote = @am__quote@
 install_sh = @install_sh@
 sbin_PROGRAMS = xipd
-xipd_SOURCES = xipd.c 
+xipd_SOURCES = dpms.c proc.c xipd.c 
 man_MANS = xipd.8
 EXTRA_DIST = $(man_MANS)
 subdir = .
@@ -92,7 +92,7 @@ CONFIG_CLEAN_FILES =
 sbin_PROGRAMS = xipd$(EXEEXT)
 PROGRAMS = $(sbin_PROGRAMS)
 
-am_xipd_OBJECTS = xipd.$(OBJEXT)
+am_xipd_OBJECTS = dpms.$(OBJEXT) proc.$(OBJEXT) xipd.$(OBJEXT)
 xipd_OBJECTS = $(am_xipd_OBJECTS)
 xipd_LDADD = $(LDADD)
 xipd_DEPENDENCIES =
@@ -105,7 +105,8 @@ LDFLAGS = @LDFLAGS@
 LIBS = @LIBS@
 depcomp = $(SHELL) $(top_srcdir)/depcomp
 am__depfiles_maybe = depfiles
-@AMDEP_TRUE@DEP_FILES = ./$(DEPDIR)/xipd.Po
+@AMDEP_TRUE@DEP_FILES = ./$(DEPDIR)/dpms.Po ./$(DEPDIR)/proc.Po \
+@AMDEP_TRUE@	./$(DEPDIR)/xipd.Po
 COMPILE = $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) \
 	$(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS)
 CCLD = $(CC)
@@ -116,9 +117,8 @@ DIST_SOURCES = $(xipd_SOURCES)
 NROFF = nroff
 MANS = $(man_MANS)
 DIST_COMMON = README AUTHORS COPYING ChangeLog INSTALL Makefile.am \
-	Makefile.in NEWS aclocal.m4 config.guess config.h.in config.sub \
-	configure configure.ac depcomp install-sh ltmain.sh missing \
-	mkinstalldirs
+	Makefile.in NEWS aclocal.m4 config.h.in configure configure.ac \
+	depcomp install-sh missing mkinstalldirs
 SOURCES = $(xipd_SOURCES)
 
 all: config.h
@@ -192,6 +192,8 @@ mostlyclean-compile:
 distclean-compile:
 	-rm -f *.tab.c
 
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/dpms.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/proc.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/xipd.Po@am__quote@
 
 distclean-depend:
