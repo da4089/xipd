@@ -1,0 +1,94 @@
+xipd - X11 Idle Presence Daemon
+
+The Elvin presence protocol is used to inform colleagues and friend of
+your presence at a particular location, and optionally, the task that
+currently occupies you.  This is particularly useful for
+geographically distributed teams, giving an indication of colleagues'
+activities and availability using very low bandwidth.
+
+This program is used to monitor activity on an X11 (mostly)
+workstation.  Configured with a timeout period, it will announce times
+when that period elapses without keyboard or mouse activity.
+Naturally, it also announces subsequent resumption of keyboard or
+mouse activty.
+
+It can function in two modes: as a complete presence client, or as an
+adjunct to another presence client, supplying activity information to
+augment the task information provided manually by the owner.
+
+xipd uses multiple methods to obtain the activity information from the
+workstation:
+
+- The simplest, and most reliable, works only for GNU/Linux systems --
+  it periodically checks /proc/interrupts, and if the interrupt count
+  for the keyboard (int1) or the mouse (int12) have not changed, the
+  machine is considered idle, or, 
+
+- If the X display has the DPMS extension available, and enabled, we
+  periodically query the state of the monitor.  If it is in any of the
+  non-On states (Standby, Suspend, Off) then the machine is considered
+  idle, or,
+
+- If the X display has the MIT Screen-Saver extension available, we
+  ask it to inform us when it starts and stops the screen saver, or,
+
+- If the old built-in X screen saver is active, we periodically poll
+  its idle status.
+
+If none of these methods are available, the program will fail to
+start.
+
+xipd must be started specifying one of its two modes.
+
+In standalone mode, each instance of xipd is configured with the name
+of the person whose presence it is monitoring, the person's default
+group, and a location, describing the machine on which it is running.
+It can optionally take a list of groups in which the monitored person
+is a member.
+
+   -e elvin://server.example.com
+   -S scope
+   -h
+   -v
+   
+   -s          (standalone)
+   -u user     (person)
+   -D domain   (default group)
+   -g groups   (comma separated list of group names)
+   -l location
+
+
+By default, it announces the person's presence like:
+
+   Presence-Info: "update"
+   Presence-Protocol: 1000
+   Client-Id: "58cdb57f-5f91-4778-8cc6-92029818f599"
+   User: "person@group"
+   Status: online | unavailable?
+   Status-Text: location
+   Status-Duration: time in this state
+   Groups: "|group|group|"
+
+      
+In augmentation mode, the function of xipd is to determine the level
+of activity at the host workstation, and forward that info to another
+presence client.  To do this, it uses a private notification format,
+to which the presence client may subscribe.
+
+In this mode, the xipd is configured with the unique name of the user
+(user@domain) and a location string representing the monitored
+machine.
+
+   -u user
+   -D domain
+   -l location
+
+The notification format
+
+   activity.0x1.org: 1000
+   User: "user@domain"
+   Location: "location"
+   State: "active" | "inactive"
+
+
+   
