@@ -51,13 +51,16 @@
 
 
 /*#define ACTIVE_DELAY  (300)*/
-#define ACTIVE_DELAY  (30)
-#define APP_CLASS     "Xipd"
+#define ACTIVE_DELAY        (3)
+#define APP_CLASS           "Xipd"
 
+#define STATUS_ONLINE       "online"
+#define STATUS_DOUBTFUL     "unavailable?"
+#define STATUS_UNAVAILABLE  "unavailable"
+#define STATUS_OFFLINE      "offline"
 
-static elvin_error_t error;
-static elvin_handle_t handle;
-static elvin_notification_t nfn;
+#define TEXT_ONLINE         "Active at %s"
+#define TEXT_DOUBTFUL       "Last active at %s at %s"
 
 
 /* Application configuration */
@@ -73,6 +76,46 @@ typedef struct app_data {
     Bool version;
     Bool debug;
 } *app_data_t;
+
+
+/* Application runtime state */
+typedef struct state {
+    /* X properties */
+    XtAppContext app_context;
+    Widget toplevel;
+    Display *display;
+
+    /* Elvin properties */
+    elvin_error_t error;
+    elvin_handle_t handle;
+
+    /* Config info, extracted from X resources */
+    struct app_data app_data;
+
+    /* Activity monitor timer */
+    XtIntervalId timer;
+
+    /* Current state flag */
+    int is_active;
+
+    /* Monitoring mechanism flags */
+    int have_dpms;
+    int have_proc;
+
+    /* Last sample counts for /proc interface */
+    long last_keyboard, last_mouse;
+
+    /* Time of last state change (for duration calculations) */
+    time_t last_change;
+
+    /* Calculated text field for notifications */
+    char *host;
+    char *addr;
+    char *user;
+    char *client_id;
+
+} *state_t;
+
 
 /* Legal command-line options */
 static XrmOptionDescRec opt_table[] = 
@@ -128,300 +171,231 @@ static void do_usage(int argc, char *argv[], FILE *file)
 }
 
 
-/* Send notification of state change */
-int send_event(int now_active)
+int send_initial_presence_info(state_t s)
 {
-    struct timeval tv;
-    char host[64], addr[64];
-    struct hostent *this_host;
+    elvin_notification_t nfn;
+    char text[64];
 
     /* Build the notification */
-    if (! (nfn = elvin_notification_alloc(error))) {
-        elvin_error_fprintf(stderr, error);
+    if (! (nfn = elvin_notification_alloc(s->error))) {
+        elvin_error_fprintf(stderr, s->error);
         exit(1);
     }
 
-    if (! elvin_notification_add_int32 (nfn, "activity.0x1.org", 1000, error)) {
-        elvin_error_fprintf(stderr, error);
+    /* Build status text */
+    snprintf(text, 64, "xipd presence monitor started at %s", 
+             strlen(s->app_data.location) ? s->app_data.location : s->host);
+
+    /* Build notification */
+    if (! elvin_notification_add_int32 (nfn, "Presence-Protocol", 1000, s->error) ||
+        ! elvin_notification_add_string(nfn, "Presence-Info", "initial", s->error) ||
+        ! elvin_notification_add_string(nfn, "Client-Id", s->client_id, s->error) ||
+        ! elvin_notification_add_string(nfn, "User", s->user, s->error) ||
+        ! elvin_notification_add_string(nfn, "Groups", s->app_data.groups, s->error) ||
+        ! elvin_notification_add_string(nfn, "Status", STATUS_ONLINE, s->error) ||
+        ! elvin_notification_add_string(nfn, "Status-Text", text, s->error) ||
+        ! elvin_notification_add_int32 (nfn, "Status-Duration", 0, s->error)) {
+        elvin_error_fprintf(stderr, s->error);
         exit(1);
-    }
-
-    /* Get host name */
-    if (gethostname(host, 64) < 0) {
-        fprintf(stderr, "Failed to get trap host name\n");
-
-    } else {
-        /* Lookup trap host details */
-        if (! (this_host = gethostbyname(host))) {
-            fprintf(stderr, "Failed to get trap host address\n");
-
-        } else {
-            if (! elvin_notification_add_string (nfn, "Host-Name", this_host->h_name, error)) {
-                elvin_error_fprintf(stderr, error);
-                exit(1);
-            }
-
-            if (! inet_ntop(AF_INET, this_host->h_addr_list[0], addr, 64)) {
-                fprintf(stderr, "Failed to get convert trap host address\n");
-                strcpy(addr, "<unknown host>");
-            }
-
-            if (! elvin_notification_add_string (nfn, "Host-IP4-Address", addr, error)) {
-                elvin_error_fprintf(stderr, error);
-                exit(1);
-            }
-        }
-    }
-
-    /* Lookup time */
-    if (gettimeofday(&tv, NULL) < 0) {
-        fprintf(stderr, "Failed to get time of day!\n");
-
-    } else {
-        if (! elvin_notification_add_int32 (nfn, "Date-Time", tv.tv_sec, error)) {
-            elvin_error_fprintf(stderr, error);
-            return 0;
-        }
-    }
-
-    /* Set state */
-    if (! elvin_notification_add_string(nfn, 
-                                        "State", 
-                                        now_active ? "active" : "inactive", 
-                                        error)) {
-        elvin_error_fprintf(stderr, error);
-        return 0;
     }
 
     /* Send notification */
-    if (! elvin_sync_notify(handle, nfn, 1, NULL, error)) {
-        elvin_error_fprintf(stderr, error);
-        return 0;
-    }
-
-    /* Clean up notification */
-    elvin_notification_remove(nfn, "Date-Time", NULL);
-    elvin_notification_remove(nfn, "State", NULL);
-
-    if (! elvin_notification_free(nfn, error)) {
-        elvin_error_fprintf(stderr, error);
+    if (! elvin_xt_notify(s->handle, nfn, 1, NULL, s->error)) {
+        elvin_error_fprintf(stderr, s->error);
         exit(1);
     }
 
+    /* Free notification */
+    if (! elvin_notification_free(nfn, s->error)) {
+        elvin_error_fprintf(stderr, s->error);
+        exit(1);
+    }
 
     return 1;
 }
 
 
-int foo(void)
+int send_final_presence_info(state_t s)
 {
-    Display *display = NULL;
-    int have_x, have_dpms, have_proc, is_active;
+    elvin_notification_t nfn;
 
-    /* */
-    if (have_dpms) {
+    /* Build the notification */
+    if (! (nfn = elvin_notification_alloc(s->error))) {
+        elvin_error_fprintf(stderr, s->error);
+        exit(1);
+    }
 
-        printf("have dpms!\n");
+    /* Construct notification */
+    if (! elvin_notification_add_int32 (nfn, "Presence-Protocol", 1000, s->error) ||
+        ! elvin_notification_add_string(nfn, "Presence-Info", "update", s->error) ||
+        ! elvin_notification_add_string(nfn, "Client-Id", s->client_id, s->error) ||
+        ! elvin_notification_add_string(nfn, "User", s->user, s->error) ||
+        ! elvin_notification_add_string(nfn, "Groups", s->app_data.groups, s->error) ||
+        ! elvin_notification_add_string(nfn, "Status", STATUS_OFFLINE, s->error) ||
+        ! elvin_notification_add_string(nfn, "Status-Text", 
+                                        "xipd presence monitor exited" , s->error) ||
+        ! elvin_notification_add_int32 (nfn, "Status-Duration", 0, s->error)) {
+        elvin_error_fprintf(stderr, s->error);
+        exit(1);
+    }
 
-        while (1) {
-            int on;
-            
-            xipd_read_dpms(display, &on);
+    /* Send notification */
+    if (! elvin_xt_notify(s->handle, nfn, 1, NULL, s->error)) {
+        elvin_error_fprintf(stderr, s->error);
+        return 0;
+    }
 
-            if (on) {
-                if (! is_active) {
-                    printf("went active\n");
-                    is_active = 1;
-                    send_event(1);
-                }
+    /* Free notification */
+    if (! elvin_notification_free(nfn, s->error)) {
+        elvin_error_fprintf(stderr, s->error);
+        exit(1);
+    }
 
-            } else {
-                if (is_active) {
-                    printf("went passive\n");
-                    is_active = 0;
-                    send_event(0);
-                }
-            }
+    return 1;
+}
 
-            printf("sleep\n");
-            sleep (ACTIVE_DELAY);
+
+/* Send notification of state change */
+int send_event(state_t s, int now_active)
+{
+    elvin_notification_t nfn;
+    char text[64];
+
+    /* Build the notification */
+    if (! (nfn = elvin_notification_alloc(s->error))) {
+        elvin_error_fprintf(stderr, s->error);
+        exit(1);
+    }
+
+    if (s->app_data.standalone == True) {
+
+        /* Construct status text */
+        if (now_active) {
+            snprintf(text, 64, TEXT_ONLINE, 
+                     strlen(s->app_data.location) ? s->app_data.location : s->host);
+        } else {
+            snprintf(text, 64, TEXT_DOUBTFUL, 
+                     strlen(s->app_data.location) ? s->app_data.location : s->host,
+                     ctime(&(s->last_change)));
         }
 
-    } else if (have_proc) {
+        /* Construct notification */
+        if (! elvin_notification_add_int32(nfn, "Presence-Protocol", 1000, s->error) ||
+            ! elvin_notification_add_string(nfn, "Presence-Info", "update", s->error) ||
+            ! elvin_notification_add_string(nfn, "Client-Id", s->client_id, s->error) ||
+            ! elvin_notification_add_string(nfn, "User", s->user, s->error) ||
+            ! elvin_notification_add_string(nfn, "Groups", s->app_data.groups, s->error) ||
+            ! elvin_notification_add_string(nfn, "Status", 
+                                            now_active ? STATUS_ONLINE : STATUS_DOUBTFUL, 
+                                            s->error) ||
+            ! elvin_notification_add_string(nfn, "Status-Text", text, s->error) ||
+            ! elvin_notification_add_int32(nfn, "Status-Duration", 
+                                           time(NULL) - s->last_change, s->error)) {
+            elvin_error_fprintf(stderr, s->error);
+            exit(1);
+        }
 
-        long keyboard, last_keyboard = 0;
-        long mouse, last_mouse = 0;
+    } else { /* activity.0x1.org */
 
-        /* Loop, looking for change and no-change */
-        while (1) {
-
-            /* Get interrupt counts */
-            if (! (xipd_read_proc(&keyboard, &mouse))) {
-                fprintf(stderr, "error reading /proc/interrupts !?\n");
-                exit(1);
-            }
-
-            printf("is_active %d\tkeyb %ld\tmouse %ld\n", is_active, keyboard, mouse);
-
-            if (keyboard == last_keyboard && mouse == last_mouse) {
-                /* No change == idle */
-                if (is_active) {
-                    printf("went passive ...\n");
-                    is_active = 0;
-                    send_event(0);
-                }
-
-            } else {
-                /* Change == not idle */
-                if (! is_active) {
-                    printf("went active ...\n");
-                    is_active = 1;
-                    send_event(1);
-                }
-            }
-
-            /* Sleep until next reading */
-            sleep(ACTIVE_DELAY);
-
-            /* Update */
-            last_keyboard = keyboard;
-            last_mouse = mouse;
+        /* Construct notification */
+        if (! elvin_notification_add_string(nfn, "Host-Name", s->host, s->error) ||
+            ! elvin_notification_add_string(nfn, "Host-IP4-Address", s->addr, s->error) ||
+            ! elvin_notification_add_int32 (nfn, "activity.0x1.org", 1000, s->error) ||
+            ! elvin_notification_add_int32 (nfn, "Date-Time", time(NULL), s->error) ||
+            ! elvin_notification_add_string(nfn, "State", 
+                                            now_active ? "active" : "inactive", 
+                                            s->error)) {
+            elvin_error_fprintf(stderr, s->error);
+            exit(1);
         }
     }
+
+    /* Send notification */
+    if (! elvin_xt_notify(s->handle, nfn, 1, NULL, s->error)) {
+        elvin_error_fprintf(stderr, s->error);
+        return 0;
+    }
+
+    /* Free notification */
+    if (! elvin_notification_free(nfn, s->error)) {
+        elvin_error_fprintf(stderr, s->error);
+        exit(1);
+    }
+
+    /* Reset last update time */
+    s->last_change = time(NULL);
+
+    return 1;
+}
+
+
+int check_activity(state_t state)
+{
+    /* */
+    if (state->have_dpms) {
+        int on;
+
+        xipd_read_dpms(state->display, &on);
+
+        if (on) {
+            if (! state->is_active) {
+                printf("went active\n");
+                state->is_active = 1;
+                send_event(state, 1);
+            }
+
+        } else {
+            if (state->is_active) {
+                printf("went passive\n");
+                state->is_active = 0;
+                send_event(state, 0);
+            }
+        }
+
+    } else if (state->have_proc) {
+
+        long keyboard = 0;
+        long mouse = 0;
+
+        /* Get interrupt counts */
+        if (! (xipd_read_proc(&keyboard, &mouse))) {
+            fprintf(stderr, "error reading /proc/interrupts !?\n");
+            exit(1);
+        }
+
+        if (keyboard == state->last_keyboard && mouse == state->last_mouse) {
+            /* No change == idle */
+            if (state->is_active) {
+                printf("went passive ...\n");
+                state->is_active = 0;
+                send_event(state, 0);
+            }
+
+        } else {
+            /* Change == not idle */
+            if (! state->is_active) {
+                printf("went active ...\n");
+                state->is_active = 1;
+                send_event(state, 1);
+            }
+        }
+
+        /* Update */
+        state->last_keyboard = keyboard;
+        state->last_mouse = mouse;
+    }
+}
+
+
+void sub_cb(void)
+{
+    /* Send notification of current status */
 }
 
 
 void disconnect_cb(elvin_handle_t handle, int result, void *rock, elvin_error_t error)
 {
     printf("disconnect\n");
-
-    /* Request mainloop be halted. */
-    XtAppSetExitFlag((XtAppContext)rock);
-
-    return;
-}
-
-
-void connect_cb(elvin_handle_t handle, int result, void *rock, elvin_error_t error)
-{
-
-    printf("connect\n");
-
-    /* Disconnect and clean up */
-    if (! elvin_xt_disconnect(handle, disconnect_cb, rock, error) ) {
-        elvin_error_fprintf(stderr, error);
-        exit(1);
-    }
-
-    return;
-}
-
-
-/* Main */
-
-int main(int argc, char *argv[])
-{
-    XtAppContext app_context;
-    Widget toplevel;
-    struct app_data app_data;
-    char *display_name = NULL;
-    int xargc = argc;
-
-    char c;
-    char *space, *cr;
-    int is_active = 1;
-    int have_x, have_dpms, have_proc;
-
-
-    /* Initialize */
-    toplevel = XtVaAppInitialize(&app_context,
-                                 APP_CLASS,
-                                 opt_table,
-                                 16,
-                                 &xargc,
-                                 argv,
-                                 NULL,
-                                 NULL, NULL);
-
-    /* Check for excess args */
-    if (xargc != 1) {
-        do_usage(argc, argv, stderr);
-        exit(1);
-    }
-
-    /* Fetch option values */
-    XtVaGetApplicationResources(toplevel,
-                                &app_data,
-                                resources,
-                                XtNumber(resources),
-                                NULL);
-    /* Help */
-    if (app_data.help == True) {
-        printf("help\n");
-        exit(0);
-    }
-
-    /* Version */
-    if (app_data.version == True) {
-        printf(VERSION "\n");
-        exit(0);
-    }
-
-    /* Check whether we can get activity info */
-    have_dpms = xipd_have_dpms(XtDisplay(toplevel));
-    have_proc = xipd_have_proc();
-
-    if (! have_dpms && ! have_proc) {
-        fprintf(stderr, "Cannot use DPMS or /proc for activity detection.\n");
-        exit(1);
-    }
-
-    /* Initialise Elvin */
-#if ! defined(ELVIN_VERSION_AT_LEAST)
-    if (! (error = elvin_xt_init(app_context))) {
-        fprintf(stderr, "Failed to initialise Elvin library\n");
-        exit(1);
-    }
-#else
-    if (! (error = elvin_error_alloc(NULL))) {
-        fprintf(stderr, "Failed to allocate error context!\n");
-        exit(1);
-    }
-
-    if (! elvin_xt_init_default(app_context, error)) {
-        fprintf(stderr, "Failed to initialise Elvin library\n");
-        exit(1);
-    }
-#endif
-
-    /* Create handle */
-    if (! (handle = elvin_handle_alloc(error))) {
-        elvin_error_fprintf(stderr, error);
-        exit(1);
-    }
-
-    /* Un-limit connection retries */
-    if (! elvin_handle_set_connection_retries(handle, -1, error)) {
-        elvin_error_fprintf(stderr, error);
-        exit(1);
-    }
-
-    /* Add router URL to handle */
-    if (app_data.elvin) {
-        if (! elvin_handle_append_url(handle, app_data.elvin, error)) {
-            elvin_error_fprintf(stderr, error);
-            exit(1);
-        }
-    }
-
-    /* Connect to the server */
-    if (! elvin_xt_connect(handle, connect_cb, (void *)app_context, error)) {
-        elvin_error_fprintf(stderr, error);
-        exit(1);
-    }
-
-    /* Start mainloop */
-    XtAppMainLoop(app_context);
 
     /* Clean up */
     if (! elvin_handle_free(handle, error) || ! elvin_xt_cleanup(1, error)) {
@@ -434,4 +408,188 @@ int main(int argc, char *argv[])
 #endif
 
     exit(0);
+}
+
+
+void timer_cb(XtPointer rock, XtIntervalId *id)
+{
+    state_t state = (state_t)rock;
+
+    /* See if machine has changed state */
+    check_activity(state);
+
+    /* Reschedule timer */
+    state->timer = XtAppAddTimeOut(state->app_context, 
+                                   ACTIVE_DELAY * 1000, 
+                                   timer_cb, 
+                                   (XtPointer)state);
+    return;
+}
+
+
+void connect_cb(elvin_handle_t handle, int result, void *rock, elvin_error_t error)
+{
+    state_t state = (state_t)rock;
+
+    /* Send initial notification */
+    if (state->app_data.standalone) {
+        send_initial_presence_info(state);
+    }
+
+    /* Reschedule timer */
+    state->timer = XtAppAddTimeOut(state->app_context, 
+                                   ACTIVE_DELAY * 1000, 
+                                   timer_cb, 
+                                   (XtPointer)state);
+
+#if 0
+    /* Disconnect and clean up */
+    if (! elvin_xt_disconnect(handle, disconnect_cb, rock, error) ) {
+        elvin_error_fprintf(stderr, error);
+        exit(1);
+    }
+#endif
+
+    return;
+}
+
+
+/* Main */
+
+int main(int argc, char *argv[])
+{
+    struct state state;
+    char host[64], addr[64], user[64], client_id[64];
+    struct hostent *this_host;
+    int xargc = argc;
+
+    /* Initialize */
+    state.toplevel = XtVaAppInitialize(&state.app_context,
+                                       APP_CLASS,
+                                       opt_table,
+                                       16,
+                                       &xargc,
+                                       argv,
+                                       NULL,
+                                       NULL, NULL);
+
+    /* Check for excess args */
+    if (xargc != 1) {
+        do_usage(argc, argv, stderr);
+        exit(1);
+    }
+
+    /* Fetch option values */
+    XtVaGetApplicationResources(state.toplevel,
+                                &state.app_data,
+                                resources,
+                                XtNumber(resources),
+                                NULL);
+    /* Help */
+    if (state.app_data.help == True) {
+        printf("help\n");
+        exit(0);
+    }
+
+    /* Version */
+    if (state.app_data.version == True) {
+        printf(VERSION "\n");
+        exit(0);
+    }
+
+    /* Get host name */
+    if (gethostname(host, 64) < 0) {
+        fprintf(stderr, "Failed to get host name\n");
+        strcpy(host, "<unknown>");
+        strcpy(addr, "<unknown>");
+
+    } else {
+        /* Lookup trap host details */
+        if (! (this_host = gethostbyname(host))) {
+            fprintf(stderr, "Failed to get host address\n");
+            strcpy(addr, "<unknown>");
+
+        } else {
+            if (! inet_ntop(AF_INET, this_host->h_addr_list[0], addr, 64)) {
+                fprintf(stderr, "Failed to get convert host address\n");
+                strcpy(addr, "<unknown>");
+            }
+        }
+    }
+
+    /* Construct text attributes */
+    snprintf(user, 64, "%s@%s", state.app_data.user, state.app_data.domain);
+    snprintf(client_id, 64, "%d%d", getpid(), getppid());
+
+    /* Initialise state info */
+    state.display = XtDisplay(state.toplevel);
+    state.is_active = 0;
+    state.have_dpms = 0;
+    state.have_proc = 0;
+    state.last_keyboard = 0;
+    state.last_mouse = 0;
+    state.last_change = time(NULL);
+    state.host = host;
+    state.addr = addr;
+    state.user = user;
+    state.client_id = client_id;
+
+    /* Check whether we can get activity info */
+    state.have_dpms = xipd_have_dpms(state.display);
+    state.have_proc = xipd_have_proc();
+
+    if (! state.have_dpms && ! state.have_proc) {
+        fprintf(stderr, "Cannot use DPMS or /proc for activity detection.\n");
+        exit(1);
+    }
+
+    /* Initialise Elvin */
+#if ! defined(ELVIN_VERSION_AT_LEAST)
+    if (! (state.error = elvin_xt_init(state.app_context))) {
+        fprintf(stderr, "Failed to initialise Elvin library\n");
+        exit(1);
+    }
+#else
+    if (! (state.error = elvin_error_alloc(NULL))) {
+        fprintf(stderr, "Failed to allocate error context!\n");
+        exit(1);
+    }
+
+    if (! elvin_xt_init_default(state.app_context, state.error)) {
+        fprintf(stderr, "Failed to initialise Elvin library\n");
+        exit(1);
+    }
+#endif
+
+    /* Create handle */
+    if (! (state.handle = elvin_handle_alloc(state.error))) {
+        elvin_error_fprintf(stderr, state.error);
+        exit(1);
+    }
+
+    /* Un-limit connection retries */
+    if (! elvin_handle_set_connection_retries(state.handle, -1, state.error)) {
+        elvin_error_fprintf(stderr, state.error);
+        exit(1);
+    }
+
+    /* Add router URL to handle */
+    if (state.app_data.elvin) {
+        if (! elvin_handle_append_url(state.handle, state.app_data.elvin, state.error)) {
+            elvin_error_fprintf(stderr, state.error);
+            exit(1);
+        }
+    }
+
+    /* Connect to the server */
+    if (! elvin_xt_connect(state.handle, connect_cb, (void *)&state, state.error)) {
+        elvin_error_fprintf(stderr, state.error);
+        exit(1);
+    }
+
+    /* Start mainloop */
+    XtAppMainLoop(state.app_context);
+
+    /* Just to keep gcc happy */
+    return 1;
 }

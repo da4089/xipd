@@ -6,7 +6,8 @@ stamp-h1
 config.h
 config.h.in
 Makefile
+Makefile.in
 config.log
 config.status
 configure
-
+autom4te.cache
