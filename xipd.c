@@ -195,7 +195,7 @@ int send_initial_presence_info(state_t s)
     }
 
     /* Build status text */
-    snprintf(text, 64, "xipd presence monitor started at %s", 
+    snprintf(text, 64, "[xipd started at %s]", 
              strlen(s->app_data.location) ? s->app_data.location : s->host);
 
     /* Build notification */
@@ -245,7 +245,7 @@ int send_final_presence_info(state_t s)
         ! elvin_notification_add_string(nfn, "Groups", s->app_data.groups, s->error) ||
         ! elvin_notification_add_string(nfn, "Status", STATUS_OFFLINE, s->error) ||
         ! elvin_notification_add_string(nfn, "Status-Text", 
-                                        "xipd presence monitor exited" , s->error) ||
+                                        "[xipd shutdown]" , s->error) ||
         ! elvin_notification_add_int32 (nfn, "Status-Duration", 0, s->error)) {
         elvin_error_fprintf(stderr, s->error);
         exit(1);
@@ -627,5 +627,5 @@ int main(int argc, char *argv[])
     XtAppMainLoop(state.app_context);
 
     /* Just to keep gcc happy */
-    return 1;
+    return 0;
 }
