@@ -1,6 +1,8 @@
 
 
 #include "config.h"
+#include <X11/Xlib.h>
+
 
 #if ! defined(HAVE_DPMS_EXTENSION)
 

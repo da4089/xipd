@@ -54,6 +54,8 @@
 #include <elvin/elvin.h>
 #include <elvin/xt_mainloop.h>
 
+#include "dpms.h"
+
 
 /*#define ACTIVE_DELAY  (300)*/
 #define ACTIVE_DELAY        (3)
@@ -92,6 +94,7 @@ typedef struct state {
 
     /* Elvin properties */
     elvin_error_t error;
+    elvin_client_t client;
     elvin_handle_t handle;
 
     /* Config info, extracted from X resources */
@@ -189,7 +192,7 @@ int send_initial_presence_info(state_t s)
     char text[64];
 
     /* Build the notification */
-    if (! (nfn = elvin_notification_alloc(s->error))) {
+    if (! (nfn = elvin_notification_alloc(s->client, s->error))) {
         elvin_error_fprintf(stderr, s->error);
         exit(1);
     }
@@ -212,7 +215,7 @@ int send_initial_presence_info(state_t s)
     }
 
     /* Send notification */
-    if (! elvin_xt_notify(s->handle, nfn, 1, NULL, s->error)) {
+    if (! elvin_sync_notify(s->handle, nfn, 1, NULL, s->error)) {
         elvin_error_fprintf(stderr, s->error);
         exit(1);
     }
@@ -232,7 +235,7 @@ int send_final_presence_info(state_t s)
     elvin_notification_t nfn;
 
     /* Build the notification */
-    if (! (nfn = elvin_notification_alloc(s->error))) {
+    if (! (nfn = elvin_notification_alloc(s->client, s->error))) {
         elvin_error_fprintf(stderr, s->error);
         exit(1);
     }
@@ -252,7 +255,7 @@ int send_final_presence_info(state_t s)
     }
 
     /* Send notification */
-    if (! elvin_xt_notify(s->handle, nfn, 1, NULL, s->error)) {
+    if (! elvin_sync_notify(s->handle, nfn, 1, NULL, s->error)) {
         elvin_error_fprintf(stderr, s->error);
         return 0;
     }
@@ -274,7 +277,7 @@ int send_event(state_t s, int now_active)
     char text[64];
 
     /* Build the notification */
-    if (! (nfn = elvin_notification_alloc(s->error))) {
+    if (! (nfn = elvin_notification_alloc(s->client, s->error))) {
         elvin_error_fprintf(stderr, s->error);
         exit(1);
     }
@@ -323,7 +326,7 @@ int send_event(state_t s, int now_active)
     }
 
     /* Send notification */
-    if (! elvin_xt_notify(s->handle, nfn, 1, NULL, s->error)) {
+    if (! elvin_sync_notify(s->handle, nfn, 1, NULL, s->error)) {
         elvin_error_fprintf(stderr, s->error);
         return 0;
     }
@@ -586,19 +589,24 @@ int main(int argc, char *argv[])
         exit(1);
     }
 #else
-    if (! (state.error = elvin_error_alloc(NULL))) {
-        fprintf(stderr, "Failed to allocate error context!\n");
+    if (! (state.error = elvin_error_alloc(NULL, NULL))) {
+        fprintf(stderr, "Failed to allocate initial error context!\n");
         exit(1);
     }
 
-    if (! elvin_xt_init_default(state.app_context, state.error)) {
+    if (! (state.client = elvin_client_alloc(state.error))) {
+        fprintf(stderr, "Failed to allocate client context!\n");
+        exit(1);
+    }
+
+    if (! elvin_xt_init(state.client, state.app_context, state.error)) {
         fprintf(stderr, "Failed to initialise Elvin library\n");
         exit(1);
     }
 #endif
 
     /* Create handle */
-    if (! (state.handle = elvin_handle_alloc(state.error))) {
+    if (! (state.handle = elvin_handle_alloc(state.client, state.error))) {
         elvin_error_fprintf(stderr, state.error);
         exit(1);
     }
@@ -618,7 +626,10 @@ int main(int argc, char *argv[])
     }
 
     /* Connect to the server */
-    if (! elvin_xt_connect(state.handle, connect_cb, (void *)&state, state.error)) {
+    if (! elvin_async_connect(state.handle,
+                              connect_cb,
+                              (void *)&state,
+                              state.error)) {
         elvin_error_fprintf(stderr, state.error);
         exit(1);
     }

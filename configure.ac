@@ -2,10 +2,10 @@ dnl -*- sh -*-
 ########################################################################
 ########################################################################
 
-AC_INIT(xipd.c, "davida@pobox.com")
+AC_INIT([xipd], [1.0.0])
+AC_CONFIG_SRCDIR([xipd.c])
+AM_INIT_AUTOMAKE
 AC_PREREQ(2.50)
-
-AM_INIT_AUTOMAKE(xipd, 1.0.0) dnl, no_config_h_defines)
 AM_CONFIG_HEADER(config.h)
 
 
@@ -105,14 +105,14 @@ if test "$ELVIN_CONFIG" = "not found" ; then
 fi
 
 # Update our flags to pick up the elvin includes and libraries
-CFLAGS="$CFLAGS `$ELVIN_CONFIG --cflags vin4Xt`"
-LIBS="`$ELVIN_CONFIG --libs vin4Xt` $LIBS"
+CFLAGS="$CFLAGS `$ELVIN_CONFIG --cflags elvinXt`"
+LIBS="`$ELVIN_CONFIG --libs elvinXt` $LIBS"
 
-AC_CHECK_LIB(vin4c, elvin_client_connect, true, 
-             [AC_MSG_ERROR([Could not link against libvin4c correctly?])])
+AC_CHECK_LIB(elvin, elvin_async_connect, true, 
+             [AC_MSG_ERROR([Could not link against libelvin correctly?])])
 
-AC_CHECK_LIB(vin4Xt, elvin_xt_notify, true,
-             [AC_MSG_ERROR([Could not link against libvin4Xt correctly?])])
+AC_CHECK_LIB(elvinXt, elvin_xt_init, true,
+             [AC_MSG_ERROR([Could not link against libelvinXt correctly?])])
 
 
 ########################################################################
