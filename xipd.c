@@ -55,6 +55,7 @@
 #include <elvin/xt_mainloop.h>
 
 #include "dpms.h"
+#include "proc.h"
 
 
 /*#define ACTIVE_DELAY  (300)*/
@@ -341,7 +342,7 @@ int send_event(state_t s, int now_active)
 }
 
 
-int check_activity(state_t state)
+void check_activity(state_t state)
 {
     /* */
     if (state->have_dpms) {
@@ -409,12 +410,19 @@ void sub_cb(void)
 }
 
 
-void disconnect_cb(elvin_handle_t handle, int result, void *rock, elvin_error_t error)
+int
+disconnect_cb(
+    elvin_handle_t handle,
+    int result,
+    void *rock,
+    elvin_error_t error)
 {
-    printf("disconnect\n");
+    state_t state = (state_t)rock;
 
     /* Clean up */
-    if (! elvin_handle_free(handle, error) || ! elvin_xt_cleanup(1, error)) {
+    if (! elvin_handle_free(handle, error) ||
+        ! elvin_xt_cleanup(state->client, error))
+    {
         elvin_error_fprintf(stderr, error);
         exit(1);
     }
@@ -445,7 +453,7 @@ void sigint_cb(XtPointer rock, XtSignalId *id)
     }
 
     /* Disconnect and clean up */
-    if (! elvin_xt_disconnect(s->handle, disconnect_cb, rock, s->error) ) {
+    if (! elvin_async_disconnect(s->handle, disconnect_cb, rock, s->error)) {
         elvin_error_fprintf(stderr, s->error);
         exit(1);
     }
@@ -471,7 +479,12 @@ void timer_cb(XtPointer rock, XtIntervalId *id)
 }
 
 
-void connect_cb(elvin_handle_t handle, int result, void *rock, elvin_error_t error)
+int
+connect_cb(
+    elvin_handle_t handle,
+    int result,
+    void *rock,
+    elvin_error_t error)
 {
     state_t state = (state_t)rock;
 
@@ -489,7 +502,7 @@ void connect_cb(elvin_handle_t handle, int result, void *rock, elvin_error_t err
                                    ACTIVE_DELAY * 1000, 
                                    timer_cb, 
                                    (XtPointer)state);
-    return;
+    return 1;
 }
 
 
@@ -612,7 +625,7 @@ int main(int argc, char *argv[])
     }
 
     /* Un-limit connection retries */
-    if (! elvin_handle_set_connection_retries(state.handle, -1, state.error)) {
+    if (! elvin_handle_set_connection_attempts(state.handle, 0, state.error)) {
         elvin_error_fprintf(stderr, state.error);
         exit(1);
     }
