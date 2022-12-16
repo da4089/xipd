@@ -1,7 +1,7 @@
 *~
 .nfs*
 xipd
-.deps 
+.deps
 stamp-h1
 stamp-h.in
 config.h
@@ -13,3 +13,11 @@ config.status
 configure
 autom4te.cache
 aclocal.m4
+
+COPYING
+INSTALL
+compile
+depcomp
+install-sh
+missing
+*.o
